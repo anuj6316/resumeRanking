@@ -4,7 +4,7 @@ from langchain_community.document_loaders import PyMuPDFLoader
 from scores import calculate_resume_scores
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
-import resume_database as db
+# import resume_database as db
 import shutil
 import os
 import uuid

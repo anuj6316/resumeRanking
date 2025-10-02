@@ -93,14 +93,27 @@ def upload_cv(cv_path):
         exp_section = cv.extract_experience(cv_text)
         complete_exp = work_exp_section + "\n\n" + exp_section
         unique_exp_section = exp.get_unique_experience(complete_exp)
+        qdrant_store = QdrantVectorStore(
+            client = config.QDRANT_CLIENT,
+            collection_name = config.CV_COLLECTION,
+            embedding = config.EMBEDDING_FUNCTION
+        )
         payload = {
+            "id":resume_id,
             "exp_txt": unique_exp_section,
             "total_exp": exp.total_exp_yrs(unique_exp_section),
             "edu_section": cv.extract_edu(cv_text),
             "skills_section": cv.extract_skills(cv_text),
             "projects_section": cv.extract_projects(cv_text),
-            "certification_section": cv.extract_certifications(cv_text)
+            "certification_section": cv.extract_certifications(cv_text),
+            "file_path": cv_path,
+            "page_content": cv_text
         }
+        # qdrant_store.add_documents(
+        #     documents = docs,
+        #     ids = [resume_id],
+        #     payload = payload
+        # )
         point = PointStruct(
             id=resume_id,
             vector=cv_vec,

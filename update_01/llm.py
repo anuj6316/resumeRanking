@@ -30,7 +30,7 @@ prompt = PromptTemplate(
 qdrant_client = QdrantClient(url="http://localhost:6333")
 qdrant_store = QdrantVectorStore(
     client=qdrant_client, 
-    collection_name=config.RESUME_COLLECTION, 
+    collection_name=config.CV_COLLECTION, 
     embeddings=HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL)
 )
 def ai_res(query, jd, filter_resume_ids):
@@ -59,7 +59,9 @@ def ai_res(query, jd, filter_resume_ids):
         chain = (
             {
                 'jd': lambda x: x['jd'],
-                'resumes': lambda x: retriver.invoke(x['query']),
+                'resumes': lambda x: "\n\n".join(
+                    doc.page_content for doc in retriver.invoke(x['query']) if getattr(doc, "page_content", None)
+                ),
                 'query': lambda x: x['query']
             }
             | prompt
@@ -92,7 +94,7 @@ def clean_qdrant_collection():
         
         # Scroll through all points
         points, next_offset = qdrant_client.scroll(
-            collection_name=config.RESUME_COLLECTION,
+            collection_name=config.CV_COLLECTION,
             limit=1000,
             with_payload=True
         )
@@ -118,7 +120,7 @@ def clean_qdrant_collection():
             print("✓ No invalid documents found. Collection is clean!")
         
         # Show collection stats
-        collection_info = qdrant_client.get_collection(config.RESUME_COLLECTION)
+        collection_info = qdrant_client.get_collection(config.CV_COLLECTION)
         print(f"\nCollection stats:")
         print(f"  Total points: {collection_info.points_count}")
             
@@ -137,9 +139,7 @@ def main():
     print()
     
     filter_resume_ids = [
-        '19910df0-0f79-41a6-b44a-b33bbdb7b2c8',
-        '301abdc8-6e04-4229-9726-953f1d95b777',
-        '65e100bd-4aa9-4478-94f6-ea35b22147b4'
+        'c902d79d-3d54-59db-bf0c-932b1e039aa1'
     ]
     
     jd = """

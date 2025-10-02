@@ -4,10 +4,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from langchain_huggingface import HuggingFaceEmbeddings
 import pandas as pd
+from config import Config
+config = Config()
 
-client = QdrantClient(url="http://localhost:6333")
-model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-RESUME_COLLECTION_NAME = "resumes_parse"
+model = config.EMBEDDING_FUNCTION
+client = config.QDRANT_CLIENT
 
 def calculate_resume_scores(jd_dict):
     """
@@ -55,7 +56,7 @@ def calculate_resume_scores(jd_dict):
 
     # Get all resumes from Qdrant with their embeddings
     resumes, _ = client.scroll(
-        collection_name=RESUME_COLLECTION_NAME, 
+        collection_name=config.CV_COLLECTION, 
         with_payload=True, 
         with_vectors=True,
         limit=10000  # Adjust based on your collection size
@@ -64,8 +65,8 @@ def calculate_resume_scores(jd_dict):
     results = {}
     
     for point in resumes:
-        resume_id = point.payload.get("id")
-        resume_text = point.payload.get("resume_text", "")
+        resume_id = point.id
+        # resume_text = point.payload.get("resume_text", "")
         
         # Get the full resume embedding vector from Qdrant
         resume_vec = np.array(point.vector, dtype=np.float32)
@@ -94,7 +95,7 @@ def calculate_resume_scores(jd_dict):
 
         # Experience score: numeric comparison
         jd_exp = jd_dict.get("experience", 0.0)
-        resume_exp = point.payload.get("experience", 0.0)
+        resume_exp = point.payload.get("total_exp", 0.0)
         
         # Experience scoring logic
         if jd_exp:
