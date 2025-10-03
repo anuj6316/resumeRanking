@@ -56,80 +56,76 @@ def calculate_resume_scores(jd_dict):
     cert_vec = safe_embed(cert_text)
     jd_vec = safe_embed(jd_text)
 
-    # Get all resumes from Qdrant with their embeddings
-    resumes, _ = client.scroll(
-        collection_name=config.CV_COLLECTION,
-        with_payload=True,
-        with_vectors=True,
-        limit=10000,  # Adjust based on your collection size
-    )
+    # Search for similar resumes in Qdrant
+    limit = 20  # Number of results to return for each search
 
+    def search_qdrant(vector):
+        if vector is None:
+            return []
+        return client.search(
+            collection_name=config.CV_COLLECTION,
+            query_vector=vector.tolist(),  # Convert numpy array to list
+            limit=limit,
+            with_payload=True,
+        )
+
+    skills_results = search_qdrant(skills_vec)
+    role_results = search_qdrant(role_vec)
+    education_results = search_qdrant(education_vec)
+    cert_results = search_qdrant(cert_vec)
+    overall_results = search_qdrant(jd_vec)
+
+    # Combine the results
     results = {}
+    all_results = {
+        "skills_score": skills_results,
+        "role_score": role_results,
+        "education_score": education_results,
+        "certification_score": cert_results,
+        "overall_semantic_score": overall_results,
+    }
 
-    for point in resumes:
-        resume_id = point.id
-        # resume_text = point.payload.get("resume_text", "")
+    for section, search_results in all_results.items():
+        for point in search_results:
+            resume_id = point.id
+            if resume_id not in results:
+                results[resume_id] = {
+                    "person_name": point.payload.get("person_name", "Unknown"),
+                    "file_path": point.payload.get("file_path", "Unknown"),
+                    "skills_score": 0,
+                    "role_score": 0,
+                    "experience_score": 0,
+                    "education_score": 0,
+                    "certification_score": 0,
+                    "edu_cert_score": 0,
+                    "overall_semantic_score": 0,
+                }
+            results[resume_id][section] = round(point.score, 4)
 
-        # Get the full resume embedding vector from Qdrant
-        resume_vec = np.array(point.vector, dtype=np.float32)
-
-        # Calculate similarity between JD sections and full resume embedding
-        def calculate_similarity(jd_vec):
-            """Calculate cosine similarity between JD section and resume"""
-            if jd_vec is None:
-                return 0.0
-            try:
-                if np.any(np.isnan(jd_vec)) or np.any(np.isnan(resume_vec)):
-                    return 0.0
-                # Reshape vectors for cosine_similarity (needs 2D arrays)
-                similarity = cosine_similarity([jd_vec], [resume_vec])[0][0]
-                return float(similarity)
-            except Exception as e:
-                print(f"Error calculating similarity for resume {resume_id}: {e}")
-                return 0.0
-
-        # Calculate section scores
-        skills_score = calculate_similarity(skills_vec)
-        role_score = calculate_similarity(role_vec)
-        education_score = (
-            calculate_similarity(education_vec) if education_vec is not None else 0.0
+    # Experience score: numeric comparison
+    for resume_id, scores in results.items():
+        # Retrieve the resume payload to get the total experience
+        retrieved_points = client.retrieve(
+            collection_name=config.CV_COLLECTION, ids=[resume_id], with_payload=True
         )
-        certification_score = (
-            calculate_similarity(cert_vec) if cert_vec is not None else 0.0
-        )
-        overall_semantic_score = (
-            calculate_similarity(jd_vec) if jd_vec is not None else 0.0
-        )
+        if not retrieved_points:
+            continue
 
-        # Experience score: numeric comparison
+        resume_exp = retrieved_points[0].payload.get("total_exp", 0.0)
         jd_exp = jd_dict.get("experience", 0.0)
-        resume_exp = point.payload.get("total_exp", 0.0)
 
-        # Experience scoring logic
         if jd_exp:
-            # If JD requires 0 experience (fresher), give full score if candidate is also fresher
             experience_score = 1.0 if resume_exp >= jd_exp else 0.0
         else:
-            # Score based on how close resume experience is to JD requirement
             if resume_exp >= jd_exp:
                 experience_score = 1.0
             else:
-                # Overqualified: slightly reduced score
                 experience_score = 0.0
-
-        # Combined education and certification score
-        edu_cert_score = (education_score + certification_score) / 2.0
-
-        # Store all scores for this resume
-        results[resume_id] = {
-            "skills_score": round(skills_score, 4),
-            "role_score": round(role_score, 4),
-            "experience_score": round(experience_score, 4),
-            "education_score": round(education_score, 4),
-            "certification_score": round(certification_score, 4),
-            "edu_cert_score": round(edu_cert_score, 4),
-            "overall_semantic_score": round(overall_semantic_score, 4),
-        }
+        results[resume_id]["experience_score"] = experience_score
+        results[resume_id]["edu_cert_score"] = (
+            results[resume_id]["education_score"]
+            + results[resume_id]["certification_score"]
+        ) / 2.0
 
     # Sort by overall score (you can customize the weighting)
     sorted_results = calculate_overall_scores(results)

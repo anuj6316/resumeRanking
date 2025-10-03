@@ -8,6 +8,7 @@ from typing import List
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 import re
+import spacy
 import total_exp_years as exp_years
 import datetime
 
@@ -108,9 +109,22 @@ def load_docs():
 # extrating the Education section from resumes
 
 
+import spacy
+
+nlp = spacy.load("en_core_web_sm")
+
+
+def extract_name(raw_text):
+    """Extract name from the resume text using spaCy NER."""
+    doc = nlp(raw_text)
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            return ent.text
+    return "Unknown"
+
+
 def exp_based_on_title(exp_section):
     pass
-
 
 
 def main():

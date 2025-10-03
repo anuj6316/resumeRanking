@@ -1962,6 +1962,7 @@ dependencies = [
     { name = "pymupdf" },
     { name = "python-multipart" },
     { name = "qdrant-client" },
+    { name = "requests" },
     { name = "sentence-transformers" },
     { name = "uvicorn" },
 ]
@@ -1981,6 +1982,7 @@ requires-dist = [
     { name = "pymupdf", specifier = ">=1.26.4" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "qdrant-client", specifier = ">=1.15.1" },
+    { name = "requests", specifier = ">=2.32.3" },
     { name = "sentence-transformers", specifier = ">=5.1.1" },
     { name = "uvicorn", specifier = ">=0.37.0" },
 ]

@@ -1,0 +1,16 @@
+docx2txt>=0.9
+dotenv>=0.9.9
+fastapi>=0.118.0
+gradio>=4.0.0
+langchain>=0.3.27
+langchain-community>=0.3.30
+langchain-google-genai>=2.1.12
+langchain-huggingface>=0.3.1
+langchain-qdrant>=0.2.1
+pandas>=2.3.3
+pymupdf>=1.26.4
+python-multipart>=0.0.20
+qdrant-client>=1.15.1
+sentence-transformers>=5.1.1
+uvicorn>=0.37.0
+requests>=2.32.3

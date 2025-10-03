@@ -40,7 +40,11 @@ def get_scores(jd_file, top_n):
             df.index.name = "Resume ID"
             df = df.reset_index()
             df = df.rename(
-                columns={"person_name": "Name", "overall_score": "Overall Score"}
+                columns={
+                    "person_name": "Name",
+                    "overall_score": "Overall Score",
+                    "file_path": "File Path",
+                }
             )
             return "Scores calculated successfully.", df
         else:
