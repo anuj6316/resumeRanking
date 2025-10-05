@@ -1,55 +1,100 @@
-from fastapi import FastAPI, UploadFile, File, Request
-from fastapi.responses import JSONResponse, FileResponse
-import uvicorn
+# -*- coding: utf-8 -*-
+"""
+Main FastAPI application for the Resume Ranking System.
+"""
+
+# --------------------------------------------------------------------------
+# Imports
+# --------------------------------------------------------------------------
 import os
+import shutil
+import uvicorn
+import glob
 from typing import List
+
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
+
+# Local application imports
+from config import Config
 from resume_db import upload_cv
 import sections_extractor_and_storage as jd
-import shutil
-from config import Config
 from scores import calculate_resume_scores
-from langchain_community.document_loaders import PyMuPDFLoader, Docx2txtLoader
 from llm import ai_res
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
 
+# --------------------------------------------------------------------------
+# Configuration and Global State
+# --------------------------------------------------------------------------
 config = Config()
-app = FastAPI()
-latest_jd_text = None
-latest_resume_ids = None
-# ...existing code...
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+app = FastAPI(title="Resume Ranking API", version="1.0.0")
+
+# Base directory of the application
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(APP_DIR, "uploaded_cvs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Add CORS middleware - ADD THIS SECTION
+# --- Global State ---
+# NOTE: In a production environment, this state should be managed in a
+# more robust way, e.g., using a database, cache, or a dedicated state manager.
+latest_jd_text: str | None = None
+latest_resume_ids: List[str] | None = None
+# --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Middleware
+# --------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # In production, restrict this to your frontend's origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# --------------------------------------------------------------------------
 
 
-def jd_text(file_path):
-    if file_path.endswith(".docx") or file_path.endswith(".doc"):
-        from langchain_community.document_loaders import Docx2txtLoader
+# --------------------------------------------------------------------------
+# Pydantic Models
+# --------------------------------------------------------------------------
+class QueryRequest(BaseModel):
+    """Request model for the /query/ endpoint."""
 
+    Query: str
+
+
+# --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# Helper Functions
+# --------------------------------------------------------------------------
+def get_document_text(file_path: str) -> str:
+    """
+    Load text from a .pdf, .docx, or .doc file.
+    """
+    if file_path.lower().endswith((".docx", ".doc")):
         loader = Docx2txtLoader(file_path)
-    elif file_path.endswith(".pdf"):
+    elif file_path.lower().endswith(".pdf"):
         loader = PyMuPDFLoader(file_path)
     else:
         raise ValueError(
             "Unsupported file format. Only .docx, .doc, and .pdf are supported."
         )
+
     data = loader.load()
-    text = ""
-    for doc in data:
-        text += doc.page_content + "\n\n"  # Add a double newline to separate pages
-    return text
+    return "\n\n".join(doc.page_content for doc in data)
 
 
-@app.get("/total-resumes/")
+# --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# API Endpoints
+# --------------------------------------------------------------------------
+@app.get("/total-resumes/", summary="Get total number of resumes")
 async def get_total_resumes():
     """
     Endpoint to get the total number of resumes in the Qdrant collection.
@@ -59,104 +104,146 @@ async def get_total_resumes():
         total = collection_info.points_count
         return {"total": total}
     except Exception as e:
-        return {"total": 0, "error": str(e)}
+        # Log the error for debugging
+        print(f"Error getting total resumes: {e}")
+        return JSONResponse(status_code=500, content={"total": 0, "error": str(e)})
 
 
-@app.post("/upload-cv/")
+@app.post("/upload-cv/", summary="Upload one or more resumes")
 async def upload_cv_endpoint(files: List[UploadFile] = File(...)):
     """
     Endpoint to upload multiple CV files (PDF or DOCX) to the Qdrant database.
+    Each file is saved to 'uploaded_cvs' and then processed.
     """
     results = []
-    upload_dir = "uploaded_cvs"
-    os.makedirs(upload_dir, exist_ok=True)  # Ensure the upload directory exists
-
     for file in files:
-        file_location = os.path.join(upload_dir, file.filename)
-        # Save the uploaded file to disk
-        with open(file_location, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        # Call the upload_cv function from resume_db.py
-        result = upload_cv(file_location)
-        results.append({"filename": file.filename, "result": result})
+        file_location = os.path.join(UPLOAD_DIR, file.filename)
+        try:
+            # Save the uploaded file to disk
+            with open(file_location, "wb") as f:
+                f.write(await file.read())
+
+            # Process and upload the CV to the vector database
+            result = upload_cv(file_location)
+            results.append(
+                {"filename": file.filename, "status": "success", "detail": result}
+            )
+        except Exception as e:
+            results.append(
+                {"filename": file.filename, "status": "error", "detail": str(e)}
+            )
 
     return JSONResponse(content={"results": results})
 
 
-global ids
-
-
-@app.post("/scores/")
-async def upload_pdf(file: UploadFile = File(...), n: int = 5):
-    # ensure_collection()
-
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
-    # Save the file first
-    with open(file_location, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    # Now process the saved file
-    text = jd_text(file_location)
-    result = jd.classify_jd(text)
-
-    result_dict = result.dict()
-    result_dict["jd_text"] = text
-
-    print(result)
-    ans = calculate_resume_scores(result_dict)
-    print(list(ans.keys()))
-    ids = list(ans.keys())[:n]
-    # Store latest JD text and resume IDs for query endpoint
+@app.post("/scores/", summary="Calculate resume scores against a JD")
+async def get_resume_scores(file: UploadFile = File(...), n: int = 5):
+    """
+    Upload a Job Description, process it, and return ranked resume scores.
+    """
     global latest_jd_text, latest_resume_ids
-    latest_jd_text = text
-    latest_resume_ids = ids
-    return ans
+
+    jd_file_location = os.path.join(APP_DIR, file.filename)
+
+    try:
+        # Save the JD file
+        with open(jd_file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Process the saved file
+        text = get_document_text(jd_file_location)
+        result = jd.classify_jd(text)
+
+        result_dict = result.dict()
+        result_dict["jd_text"] = text
+
+        # Calculate scores and get top N
+        all_scores = calculate_resume_scores(result_dict)
+        top_n_ids = list(all_scores.keys())[:n]
+
+        # Store state for the /query endpoint
+        latest_jd_text = text
+        latest_resume_ids = top_n_ids
+
+        # Return only the top N scores
+        top_scores = {resume_id: all_scores[resume_id] for resume_id in top_n_ids}
+
+        return JSONResponse(content=top_scores)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    finally:
+        # Clean up the uploaded JD file
+        if os.path.exists(jd_file_location):
+            os.remove(jd_file_location)
 
 
-class QueryRequest(BaseModel):
-    Query: str
-
-
-@app.post("/query/")
-def query(request: QueryRequest, n: int = 5):
-    global latest_jd_text, latest_resume_ids
+@app.post("/query/", summary="Query top resumes with an LLM")
+def query_resumes_with_llm(request: QueryRequest, n: int = 5):
+    """
+    Ask a natural language question about the top-ranked resumes for the latest JD.
+    """
     if not latest_jd_text or not latest_resume_ids:
-        return {"error": "No JD uploaded yet. Please upload a JD first."}
-    print(latest_resume_ids)
-    results = ai_res(request.Query, latest_jd_text, latest_resume_ids[:n])
+        raise HTTPException(
+            status_code=400,
+            detail="No JD has been processed. Please use the /scores endpoint first.",
+        )
+
+    # Ensure n is not greater than the number of available IDs
+    ids_to_query = latest_resume_ids[:n]
+
+    results = ai_res(request.Query, latest_jd_text, ids_to_query)
     return {"results": results}
 
 
-from fastapi.responses import FileResponse
-from fastapi import Request
-
-# ... (keep existing imports)
-
-
-@app.get("/{filepath:path}")
-async def get_file(filepath: str):
-    # Security check: only serve files from allowed directories
-    allowed_directories = [
-        os.path.abspath(os.path.join(UPLOAD_DIR, "..", "cv")),
-        os.path.abspath(os.path.join(UPLOAD_DIR, "uploaded_cvs")),
+@app.get("/view-resume/{file_name}", summary="View a specific resume file")
+def view_resume(file_name: str):
+    """
+    Searches for a resume by name in the 'cv' and 'uploaded_cvs' directories
+    and returns it for viewing as a file response.
+    """
+    # Define allowed search directories
+    search_dirs = [
+        os.path.abspath(os.path.join(APP_DIR, "..", "cv")),
+        os.path.abspath(UPLOAD_DIR),
     ]
-    requested_path = os.path.abspath(filepath)
 
-    if not any(
-        requested_path.startswith(allowed_dir) for allowed_dir in allowed_directories
-    ):
-        return JSONResponse(status_code=403, content={"error": "Access denied"})
+    found_path = None
+    for dir_path in search_dirs:
+        # Use glob to find the file recursively
+        search_pattern = os.path.join(dir_path, "**", file_name)
+        file_paths = glob.glob(search_pattern, recursive=True)
+        if file_paths:
+            found_path = file_paths[0]
+            break
 
-    if not os.path.exists(requested_path):
-        return JSONResponse(status_code=404, content={"error": "File not found"})
+    if not found_path:
+        raise HTTPException(
+            status_code=404, detail=f"Resume file '{file_name}' not found."
+        )
 
-    return FileResponse(requested_path)
+    # Determine media type and content disposition
+    media_type = "application/octet-stream"
+    content_disposition_type = "attachment"
+    if file_name.lower().endswith(".pdf"):
+        media_type = "application/pdf"
+        content_disposition_type = "inline"
+    elif file_name.lower().endswith(".docx"):
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    return FileResponse(
+        found_path,
+        media_type=media_type,
+        filename=file_name,
+        content_disposition_type=content_disposition_type,
+    )
 
 
-@app.get("/preview-resume/{resume_id}")
+@app.get("/preview-resume/{resume_id}", summary="Get resume content and file URL")
 async def preview_resume(request: Request, resume_id: str):
     """
-    Endpoint to preview a resume by its ID.
+    Endpoint to get a resume's text content and a URL to the file.
     """
     try:
         # Retrieve the resume payload from Qdrant
@@ -165,27 +252,40 @@ async def preview_resume(request: Request, resume_id: str):
         )
 
         if not retrieved_points:
-            return JSONResponse(status_code=404, content={"error": "Resume not found"})
+            raise HTTPException(status_code=44, detail="Resume not found")
 
-        # Extract file path from the payload
-        file_path = retrieved_points[0].payload.get("file_path")
+        payload = retrieved_points[0].payload
+        file_path = payload.get("file_path")
 
         if not file_path or not os.path.exists(file_path):
-            return JSONResponse(
-                status_code=404, content={"error": "Resume file not found on disk"}
-            )
+            raise HTTPException(status_code=404, detail="Resume file not found on disk")
 
-        # Read the file content
-        text = jd_text(file_path)
+        # Get file content
+        text_content = payload.get("page_content") or get_document_text(file_path)
 
-        # Construct the file URL
-        file_url = str(request.base_url) + file_path
+        # Construct a URL using the /view-resume endpoint
+        file_name = os.path.basename(file_path)
+        file_url = request.url_for("view_resume", file_name=file_name)
 
-        return {"resume_id": resume_id, "content": text, "file_url": file_url}
+        return {
+            "resume_id": resume_id,
+            "content": text_content,
+            "file_url": str(file_url),
+        }
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+# This catch-all route is now redundant if preview_resume provides a better URL.
+# However, if other parts of the system rely on it, it can be kept.
+# For now, I will comment it out in favor of the more specific /view-resume endpoint.
+# @app.get("/{filepath:path}")
+# async def get_file(filepath: str):
+#     # ... (implementation)
+
+# --------------------------------------------------------------------------
+# Main execution
+# --------------------------------------------------------------------------
 if __name__ == "__main__":
     uvicorn.run(app, port=8000, host="localhost", reload=True)
