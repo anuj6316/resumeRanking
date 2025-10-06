@@ -78,7 +78,7 @@ def calculate_resume_scores(jd_dict):
     # Combine the results
     results = {}
     all_results = {
-        "skills_score": skills_results,
+        "semantic_skills_score": skills_results,
         "role_score": role_results,
         "education_score": education_results,
         "certification_score": cert_results,
@@ -92,7 +92,8 @@ def calculate_resume_scores(jd_dict):
                 results[resume_id] = {
                     "person_name": point.payload.get("person_name", "Unknown"),
                     "file_path": point.payload.get("file_path", "Unknown"),
-                    "skills_score": 0,
+                    "keyword_skills_score": 0,
+                    "semantic_skills_score": 0,
                     "role_score": 0,
                     "experience_score": 0,
                     "education_score": 0,
@@ -102,7 +103,7 @@ def calculate_resume_scores(jd_dict):
                 }
             results[resume_id][section] = round(point.score, 4)
 
-    # Experience score: numeric comparison
+    # Experience score: numeric comparison and skill score: word matching
     for resume_id, scores in results.items():
         # Retrieve the resume payload to get the total experience
         retrieved_points = client.retrieve(
@@ -110,6 +111,18 @@ def calculate_resume_scores(jd_dict):
         )
         if not retrieved_points:
             continue
+
+        # Keyword-based skills score
+        jd_skills = jd_dict.get("skills", [])
+        if jd_skills:
+            resume_text = retrieved_points[0].payload.get("page_content", "").lower()
+            matched_count = sum(
+                1 for skill in jd_skills if skill.lower() in resume_text
+            )
+            skills_score = matched_count / len(jd_skills)
+        else:
+            skills_score = 0.0
+        results[resume_id]["keyword_skills_score"] = skills_score
 
         resume_exp = retrieved_points[0].payload.get("total_exp", 0.0)
         jd_exp = jd_dict.get("experience", 0.0)
@@ -139,15 +152,15 @@ def calculate_overall_scores(results, weights=None):
 
     Args:
         results: Dictionary of resume scores
-        weights: Dictionary of weights for each section. Default:
-                 {'skills': 0.3, 'role': 0.25, 'experience': 0.25, 'edu_cert': 0.2}
+        weights: Dictionary of weights for each section.
 
     Returns:
         Dictionary sorted by overall_score in descending order
     """
     if weights is None:
         weights = {
-            "skills_score": 30,
+            "keyword_skills_score": 15,
+            "semantic_skills_score": 15,
             "role_score": 20,
             "experience_score": 20,
             "edu_cert_score": 10,
@@ -156,7 +169,8 @@ def calculate_overall_scores(results, weights=None):
 
     for resume_id, scores in results.items():
         overall = (
-            scores["skills_score"] * weights["skills_score"]
+            scores["keyword_skills_score"] * weights["keyword_skills_score"]
+            + scores["semantic_skills_score"] * weights["semantic_skills_score"]
             + scores["role_score"] * weights["role_score"]
             + scores["experience_score"] * weights["experience_score"]
             + scores["edu_cert_score"] * weights["edu_cert_score"]

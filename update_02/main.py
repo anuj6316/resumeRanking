@@ -24,7 +24,7 @@ from resume_db import upload_cv
 import sections_extractor_and_storage as jd
 from scores import calculate_resume_scores
 from llm import ai_res
-
+from datetime import datetime
 # --------------------------------------------------------------------------
 # Configuration and Global State
 # --------------------------------------------------------------------------
@@ -115,6 +115,7 @@ async def upload_cv_endpoint(files: List[UploadFile] = File(...)):
     Endpoint to upload multiple CV files (PDF or DOCX) to the Qdrant database.
     Each file is saved to 'uploaded_cvs' and then processed.
     """
+    config.QDRANT_CLIENT.delete_collection(collection_name=config.CV_COLLECTION)
     results = []
     for file in files:
         file_location = os.path.join(UPLOAD_DIR, file.filename)
@@ -159,7 +160,7 @@ async def get_resume_scores(file: UploadFile = File(...), n: int = 5):
 
         # Calculate scores and get top N
         all_scores = calculate_resume_scores(result_dict)
-        top_n_ids = list(all_scores.keys())[:n]
+        top_n_ids = list(all_scores.keys())
 
         # Store state for the /query endpoint
         latest_jd_text = text
@@ -192,6 +193,21 @@ def query_resumes_with_llm(request: QueryRequest, n: int = 5):
     ids_to_query = latest_resume_ids[:n]
 
     results = ai_res(request.Query, latest_jd_text, ids_to_query)
+    # 1. Define a directory to store the final reports
+    reports_dir = os.path.join(APP_DIR, "final_reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    # 2. Create a unique filename using a timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_path = os.path.join(reports_dir, f"resume_analysis_report_{timestamp}.md")
+
+    # 3. Write the markdown report to the file
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(results)
+        print(f"Successfully saved report to {file_path}")
+    except Exception as e:
+        print(f"Error saving report: {e}")
     return {"results": results}
 
 

@@ -2187,7 +2187,7 @@ requires-dist = [
     { name = "qdrant-client", specifier = ">=1.15.1" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "sentence-transformers", specifier = ">=5.1.1" },
-    { name = "spacy", specifier = ">=3.8.7" },
+    { name = "spacy", specifier = ">=3.7" },
     { name = "uvicorn", specifier = ">=0.37.0" },
 ]
 
