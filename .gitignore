@@ -5,6 +5,7 @@
 # LangGraph
 .langgraph_api/
 .venv/
+venv/
 .env
 
 __pycache__/

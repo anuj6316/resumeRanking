@@ -62,12 +62,12 @@ def calculate_resume_scores(jd_dict):
     def search_qdrant(vector):
         if vector is None:
             return []
-        return client.search(
+        return client.query_points(
             collection_name=config.CV_COLLECTION,
-            query_vector=vector.tolist(),  # Convert numpy array to list
+            query=vector.tolist(),  # Convert numpy array to list
             limit=limit,
             with_payload=True,
-        )
+        ).points
 
     skills_results = search_qdrant(skills_vec)
     role_results = search_qdrant(role_vec)
