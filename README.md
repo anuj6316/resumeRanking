@@ -84,7 +84,7 @@ Open a terminal and run:
 
 ```bash
 # Ensure venv is activated
-python update_02/main.py
+python main.py
 ```
 *The backend will start at `http://localhost:8000`.*
 
@@ -94,7 +94,7 @@ Open a **new terminal**, activate the virtual environment, and run:
 
 ```bash
 source venv/bin/activate
-python update_02/gradio_ui.py
+python ui/new_gradio_ui.py
 ```
 *The UI will launch at `http://127.0.0.1:7860`.*
 
@@ -126,8 +126,12 @@ python update_02/gradio_ui.py
 
 ## Project Structure
 
-- `update_02/main.py`: FastAPI backend.
-- `update_02/gradio_ui.py`: Gradio frontend.
-- `update_02/scores.py`: Scoring logic and vector search.
-- `update_02/llm.py`: LLM integration for summaries and chat.
-- `update_02/config.py`: Configuration settings.
+- `main.py`: FastAPI backend entry point.
+- `core/`: Configuration settings (`config.py`).
+- `database/`: Database interactions (`resume_db.py`).
+- `services/`: Business logic.
+    - `llm/`: LLM integration (`llm.py`, prompts).
+    - `scoring/`: Scoring algorithms (`scores.py`).
+    - `resume_handler.py`: Resume parsing logic.
+- `ui/`: Frontend code (`new_gradio_ui.py`).
+- `utils/`: Utility functions.
